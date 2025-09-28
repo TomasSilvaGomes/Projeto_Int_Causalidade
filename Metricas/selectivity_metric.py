@@ -7,7 +7,7 @@ Higher selectivity indicates that the attribution method correctly identifies im
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from interpretability_methods import InterpretabilityMethods
+from Metodos_interpretabilidade.interpretability_methods import InterpretabilityMethods
 
 
 class SelectivityEvaluator:
@@ -19,7 +19,7 @@ class SelectivityEvaluator:
             self.interp = model_methods
     
     def compute_selectivity(self, input_data, attribution, target_class=None, 
-                          percentiles=[20, 50, 80, 90]):  # OPTIMIZED - fewer percentiles
+                          percentiles=[10, 20, 50, 80, 90, 95]):
         """
         Compute selectivity by progressively removing most important features
         
@@ -35,43 +35,40 @@ class SelectivityEvaluator:
         batch_size = input_data.shape[0]
         selectivity_scores = {p: [] for p in percentiles}
         
-        # Get original predictions
+        # Get original predictions (single batch call)
         original_preds = self.interp.model.predict(input_data, verbose=0)
         
         if target_class is None:
             target_class = np.argmax(original_preds, axis=1)
         
-        # Get original confidence scores for target classes
-        original_scores = []
-        for i, cls in enumerate(target_class):
-            original_scores.append(original_preds[i, cls])
-        original_scores = np.array(original_scores)
+        # Get original confidence scores for target classes (vectorized)
+        original_scores = original_preds[np.arange(batch_size), target_class]
         
-        for sample_idx in range(batch_size):
-            sample_input = input_data[sample_idx:sample_idx+1]
-            sample_attribution = attribution[sample_idx]
-            sample_target = target_class[sample_idx]
-            original_score = original_scores[sample_idx]
+        # Process all percentiles for all samples in batch
+        for percentile in percentiles:
+            # Create batch of modified inputs for this percentile
+            modified_batch = input_data.copy()
             
-            # Get indices of features sorted by attribution importance (descending)
-            importance_indices = np.argsort(np.abs(sample_attribution))[::-1]
-            
-            for percentile in percentiles:
+            for sample_idx in range(batch_size):
+                sample_attribution = attribution[sample_idx]
+                
+                # Get indices of features sorted by attribution importance (descending)
+                importance_indices = np.argsort(np.abs(sample_attribution))[::-1]
+                
                 # Calculate number of features to remove
                 n_features_to_remove = int(len(sample_attribution) * percentile / 100)
-                
-                # Create modified input by setting most important features to baseline (0)
-                modified_input = sample_input.copy()
                 features_to_remove = importance_indices[:n_features_to_remove]
-                modified_input[0, features_to_remove] = 0.0
                 
-                # Get prediction for modified input
-                modified_pred = self.interp.model.predict(modified_input, verbose=0)
-                modified_score = modified_pred[0, sample_target]
-                
-                # Calculate selectivity (drop in confidence)
-                selectivity = original_score - modified_score
-                selectivity_scores[percentile].append(selectivity)
+                # Set most important features to baseline (0) in the batch
+                modified_batch[sample_idx, features_to_remove] = 0.0
+            
+            # Single batch prediction for all modified samples
+            modified_preds = self.interp.model.predict(modified_batch, verbose=0)
+            modified_scores = modified_preds[np.arange(batch_size), target_class]
+            
+            # Calculate selectivity for all samples (vectorized)
+            selectivity_batch = original_scores - modified_scores
+            selectivity_scores[percentile] = selectivity_batch.tolist()
         
         # Average across all samples
         avg_selectivity = {p: np.mean(scores) for p, scores in selectivity_scores.items()}

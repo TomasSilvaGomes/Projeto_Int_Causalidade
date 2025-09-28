@@ -7,10 +7,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
-from interpretability_methods import InterpretabilityMethods
-from selectivity_metric import SelectivityEvaluator
-from continuity_metric import ContinuityEvaluator
-from road_metric import ROADEvaluator
+from Metodos_interpretabilidade.interpretability_methods import InterpretabilityMethods
+from Metricas.selectivity_metric import SelectivityEvaluator
+from Metricas.continuity_metric import ContinuityEvaluator
+from Metricas.road_metric import ROADEvaluator
 import time
 
 
@@ -32,7 +32,7 @@ class ComprehensiveEvaluator:
         Args:
             selectivity_samples: Number of samples for selectivity evaluation
             continuity_samples: Number of samples for continuity evaluation  
-            road_samples: Number of samples for ROAD evaluation (computationally intensive)
+            road_samples: Number of samples for ROAD evaluation
         """
         results = {}
         
@@ -48,7 +48,7 @@ class ComprehensiveEvaluator:
         try:
             selectivity_results = self.selectivity_eval.evaluate_all_methods(n_samples=selectivity_samples)
             results['selectivity'] = selectivity_results
-            print(f"✓ Selectivity evaluation completed in {time.time() - start_time:.1f}s")
+            print("✓ Selectivity evaluation completed")
         except Exception as e:
             print(f"✗ Selectivity evaluation failed: {str(e)}")
             results['selectivity'] = None
@@ -61,7 +61,7 @@ class ComprehensiveEvaluator:
         try:
             continuity_results = self.continuity_eval.evaluate_all_methods(n_samples=continuity_samples)
             results['continuity'] = continuity_results
-            print(f"✓ Continuity evaluation completed in {time.time() - start_time:.1f}s")
+            print("✓ Continuity evaluation completed")
         except Exception as e:
             print(f"✗ Continuity evaluation failed: {str(e)}")
             results['continuity'] = None
@@ -69,13 +69,12 @@ class ComprehensiveEvaluator:
         # 3. ROAD Evaluation
         print("\n3. ROAD EVALUATION")
         print("-" * 30)
-        print("Warning: This is computationally intensive...")
         start_time = time.time()
         
         try:
             road_results = self.road_eval.evaluate_all_methods(n_samples=road_samples)
             results['road'] = road_results
-            print(f"✓ ROAD evaluation completed in {time.time() - start_time:.1f}s")
+            print("✓ ROAD evaluation completed")
         except Exception as e:
             print(f"✗ ROAD evaluation failed: {str(e)}")
             results['road'] = None
@@ -254,6 +253,10 @@ class ComprehensiveEvaluator:
         print(df.to_string(index=False, justify='center'))
         print("-" * 80)
         
+        # Save table as CSV for easy use in reports
+        df.to_csv('interpretability_results_table.csv', index=False)
+        print("📋 Results table saved as: interpretability_results_table.csv")
+        
         return df
 
     def generate_comprehensive_report(self, results):
@@ -359,21 +362,15 @@ class ComprehensiveEvaluator:
         return results
 
 
-def main(fast_mode=False):
-    """Main comprehensive evaluation function - OPTIMIZED for MNIST"""
-    if fast_mode:
-        print("Starting ULTRA-FAST Interpretability Evaluation for MNIST...")
-        print("Fast mode - Expected time: 30-60 seconds")
-        selectivity_samples, continuity_samples, road_samples = 10, 8, 3
-    else:
-        print("Starting OPTIMIZED Interpretability Evaluation for MNIST...")
-        print("Optimized for 28x28 images - Expected time: 2-3 minutes")
-        selectivity_samples, continuity_samples, road_samples = 25, 15, 5
+def main():
+    """Main comprehensive evaluation function"""
+    print("Starting Interpretability Evaluation...")
+    selectivity_samples, continuity_samples, road_samples = 100, 50, 25
     
     # Initialize comprehensive evaluator
     evaluator = ComprehensiveEvaluator()
     
-    # Run all evaluations with OPTIMIZED parameters for MNIST
+    # Run all evaluations
     results = evaluator.run_all_evaluations(
         selectivity_samples=selectivity_samples,
         continuity_samples=continuity_samples,
@@ -407,7 +404,4 @@ def main(fast_mode=False):
 
 
 if __name__ == "__main__":
-    import sys
-    # Check if user wants fast mode
-    fast_mode = len(sys.argv) > 1 and sys.argv[1] == "fast"
-    results = main(fast_mode=fast_mode)
+    results = main()

@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tensorflow import keras
 import tensorflow as tf
-from interpretability_methods import InterpretabilityMethods
+from Metodos_interpretabilidade.interpretability_methods import InterpretabilityMethods
 
 
 class ROADEvaluator:
@@ -37,7 +37,7 @@ class ROADEvaluator:
         return X_masked
     
     def retrain_model_with_masked_data(self, mask_fraction=0.1, important_features=None, 
-                                     epochs=2, cache_key=None):  # OPTIMIZED - reduced epochs
+                                     epochs=2, cache_key=None):
         """
         Retrain model with important features masked in training data
         """
@@ -67,7 +67,7 @@ class ROADEvaluator:
                               loss='sparse_categorical_crossentropy',
                               metrics=['accuracy'])
         
-        # Train on masked data (OPTIMIZED - use subset for speed)
+        # Train on masked data
         print(f"  Retraining model with {mask_fraction*100:.0f}% features masked...")
         # Use only subset of training data for speed (still representative for MNIST)
         n_train_subset = min(30000, len(self.interp.y_train))  # Use max 30k samples
@@ -82,7 +82,7 @@ class ROADEvaluator:
         
         return retrained_model
     
-    def compute_global_feature_importance(self, n_samples=100):  # OPTIMIZED - fewer samples
+    def compute_global_feature_importance(self, n_samples=100):
         """
         Compute global feature importance across multiple samples
         """

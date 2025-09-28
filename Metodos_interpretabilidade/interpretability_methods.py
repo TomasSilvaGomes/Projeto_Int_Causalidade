@@ -10,12 +10,15 @@ from tensorflow import keras
 import matplotlib.pyplot as plt
 import struct
 import os
+import pickle
+import hashlib
+import time
 from sklearn.utils import shuffle
 from sklearn.linear_model import Ridge
 
 
 class InterpretabilityMethods:
-    def __init__(self, model_path='mnist_model.keras', weights_path='mnist_model.weights.h5'):
+    def __init__(self, model_path='Rede/mnist_model.keras', weights_path='Rede/mnist_model.weights.h5'):
         """Initialize with trained model and data"""
         self.model_path = model_path
         self.weights_path = weights_path
@@ -26,6 +29,10 @@ class InterpretabilityMethods:
         self.y_test = None
         self.x_train_flat = None
         self.x_test_flat = None
+        
+        # Caching system
+        self.cache_dir = './cache'
+        os.makedirs(self.cache_dir, exist_ok=True)
         
         # Load data and model
         self._load_data()
@@ -66,6 +73,35 @@ class InterpretabilityMethods:
         
         print(f"Data loaded: {self.X_train.shape[0]} training samples, {self.X_test.shape[0]} test samples")
     
+    def _generate_cache_key(self, method_name, input_data, target_class=None, **kwargs):
+        """Generate unique cache key for attribution results"""
+        # Create hash from input data and parameters
+        data_hash = hashlib.md5(input_data.tobytes()).hexdigest()[:8]
+        target_hash = hashlib.md5(str(target_class).encode()).hexdigest()[:4] if target_class is not None else "none"
+        params_hash = hashlib.md5(str(sorted(kwargs.items())).encode()).hexdigest()[:4]
+        
+        return f"{method_name}_{data_hash}_{target_hash}_{params_hash}.pkl"
+    
+    def _save_to_cache(self, cache_key, data):
+        """Save attribution results to cache"""
+        cache_path = os.path.join(self.cache_dir, cache_key)
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(data, f)
+        except Exception as e:
+            print(f"Warning: Could not save to cache: {e}")
+    
+    def _load_from_cache(self, cache_key):
+        """Load attribution results from cache"""
+        cache_path = os.path.join(self.cache_dir, cache_key)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load from cache: {e}")
+        return None
+
     def _load_model(self):
         """Load the trained model"""
         if os.path.exists(self.model_path):
@@ -92,11 +128,17 @@ class InterpretabilityMethods:
     
 
     
-    def lime_method(self, input_data, target_class=None, n_samples=300):
+    def lime_method(self, input_data, target_class=None, n_samples=500):
         """
-        LIME (Local Interpretable Model-agnostic Explanations) - OPTIMIZED for MNIST
+        LIME (Local Interpretable Model-agnostic Explanations)
         Uses local linear approximation to explain predictions
         """
+        # Check cache first
+        cache_key = self._generate_cache_key('lime', input_data, target_class, n_samples=n_samples)
+        cached_result = self._load_from_cache(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
         attributions = []
         
         for sample_idx in range(len(input_data)):
@@ -134,13 +176,22 @@ class InterpretabilityMethods:
             lime_attribution = ridge.coef_
             attributions.append(lime_attribution)
         
-        return np.array(attributions)
+        result = np.array(attributions)
+        # Save to cache
+        self._save_to_cache(cache_key, result)
+        return result
     
-    def shap_method(self, input_data, target_class=None, n_samples=100):
+    def shap_method(self, input_data, target_class=None, n_samples=200):
         """
-        SHAP (SHapley Additive exPlanations) - OPTIMIZED for MNIST
+        SHAP (SHapley Additive exPlanations)
         Uses more systematic sampling to approximate Shapley values
         """
+        # Check cache first
+        cache_key = self._generate_cache_key('shap', input_data, target_class, n_samples=n_samples)
+        cached_result = self._load_from_cache(cache_key)
+        if cached_result is not None:
+            return cached_result
+        
         attributions = []
         
         for sample_idx in range(len(input_data)):
@@ -170,7 +221,7 @@ class InterpretabilityMethods:
                     
                 marginal_contributions = []
                 
-                # Sample different coalition sizes - OPTIMIZED for MNIST
+                # Sample different coalition sizes
                 for coalition_size in range(0, min(30, n_features), 8):  # Larger steps, fewer sizes
                     for _ in range(max(1, n_samples // 30)):  # Fewer samples per coalition
                         # Create random coalition of given size (excluding current feature)
@@ -211,13 +262,23 @@ class InterpretabilityMethods:
             
             attributions.append(shap_values)
         
-        return np.array(attributions)
+        result = np.array(attributions)
+        # Save to cache
+        self._save_to_cache(cache_key, result)
+        return result
     
     def gradcam_method(self, input_data, target_class=None):
         """
         GradCAM - Gradient-weighted Class Activation Mapping
         Simplified implementation for dense networks using layer gradients
         """
+        # Check cache first
+        cache_key = self._generate_cache_key('gradcam', input_data, target_class)
+        cached_result = self._load_from_cache(cache_key)
+        if cached_result is not None:
+            print("  ✓ GradCAM loaded from cache")
+            return cached_result
+        
         attributions = []
         
         for sample_idx in range(len(input_data)):
@@ -307,12 +368,22 @@ class InterpretabilityMethods:
             
             del tape  # Clean up persistent tape
         
-        return np.array(attributions)
+        result = np.array(attributions)
+        # Save to cache
+        self._save_to_cache(cache_key, result)
+        return result
     
-    def integrated_gradients_method(self, input_data, target_class=None, m_steps=25):
+    def integrated_gradients_method(self, input_data, target_class=None, m_steps=50):
         """
-        Integrated Gradients - OPTIMIZED for MNIST (fewer steps sufficient for 28x28)
+        Integrated Gradients
         """
+        # Check cache first
+        cache_key = self._generate_cache_key('integrated_gradients', input_data, target_class, m_steps=m_steps)
+        cached_result = self._load_from_cache(cache_key)
+        if cached_result is not None:
+            print("  ✓ Integrated Gradients loaded from cache")
+            return cached_result
+        
         attributions = []
         
         for sample_idx in range(len(input_data)):
@@ -383,12 +454,22 @@ class InterpretabilityMethods:
             
             attributions.append(smoothed_2d.flatten())
         
-        return np.array(attributions)
+        result = np.array(attributions)
+        # Save to cache
+        self._save_to_cache(cache_key, result)
+        return result
     
     def saliency_maps(self, input_data, target_class=None):
         """
-        Saliency Maps - High-contrast gradient-based attribution
+        Saliency Maps - Gradient-based attribution
         """
+        # Check cache first
+        cache_key = self._generate_cache_key('saliency_maps', input_data, target_class)
+        cached_result = self._load_from_cache(cache_key)
+        if cached_result is not None:
+            print("  ✓ Saliency Maps loaded from cache")
+            return cached_result
+        
         attributions = []
         
         for sample_idx in range(len(input_data)):
@@ -469,7 +550,10 @@ class InterpretabilityMethods:
                 enhanced_mag = np.power(input_mag, 0.7)
                 attributions.append(enhanced_mag)
         
-        return np.array(attributions)
+        result = np.array(attributions)
+        # Save to cache
+        self._save_to_cache(cache_key, result)
+        return result
 
     def get_all_attributions(self, input_data, target_class=None):
         """
@@ -501,10 +585,14 @@ class InterpretabilityMethods:
         
         return attributions
     
-    def visualize_attributions(self, input_data, attributions, sample_idx=0, figsize=(15, 10)):
+    def visualize_attributions(self, input_data, attributions, sample_idx=0, figsize=(15, 10), 
+                             save_image=True, output_dir='./Imagens'):
         """
-        Visualize original image and all attribution methods
+        Visualize original image and all attribution methods and save to file
         """
+        # Create output directory if it doesn't exist
+        if save_image:
+            os.makedirs(output_dir, exist_ok=True)
         n_methods = len([attr for attr in attributions.values() if attr is not None])
         n_cols = min(4, n_methods + 1)  # +1 for original image
         n_rows = (n_methods + 1 + n_cols - 1) // n_cols
@@ -538,21 +626,117 @@ class InterpretabilityMethods:
             axes[i].axis('off')
         
         plt.tight_layout()
+        
+        # Save image with descriptive name
+        if save_image:
+            # Get the predicted class for the sample (use flattened data for model)
+            input_flat = input_data[sample_idx:sample_idx+1].reshape(1, -1)
+            sample_pred = self.model.predict(input_flat, verbose=0)[0]
+            predicted_class = np.argmax(sample_pred)
+            confidence = sample_pred[predicted_class]
+            
+            # Create descriptive filename
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+            methods_list = "_".join([name for name, attr in attributions.items() if attr is not None])
+            filename = f"tipos_de_metodos_sample{sample_idx}_class{predicted_class}_conf{confidence:.3f}_{timestamp}.png"
+            filepath = os.path.join(output_dir, filename)
+            
+            plt.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+            print(f"✓ Visualization saved as: {filepath}")
+        
         plt.show()
+
+    def save_multiple_visualizations(self, n_samples=5, output_dir='./Imagens'):
+        """
+        Generate and save visualizations for multiple samples
+        """
+        print(f"Generating visualizations for {n_samples} samples...")
+        
+        # Get sample data
+        sample_data = self.get_sample_data(n_samples=n_samples)
+        
+        # Get attributions for all samples
+        attributions = self.get_all_attributions(sample_data['images_flat'])
+        
+        # Create visualizations for each sample
+        for i in range(n_samples):
+            print(f"Creating visualization {i+1}/{n_samples}...")
+            self.visualize_attributions(
+                sample_data['images'], 
+                attributions, 
+                sample_idx=i,
+                save_image=True,
+                output_dir=output_dir
+            )
+            plt.close()  # Close figure to save memory
+        
+        print(f"✅ All visualizations saved in {output_dir}/")
+
+    def create_methods_comparison_grid(self, n_samples=3, output_dir='./Imagens'):
+        """
+        Create a comprehensive grid showing all methods for multiple samples
+        """
+        print(f"Creating comprehensive comparison grid for {n_samples} samples...")
+        
+        # Get sample data
+        sample_data = self.get_sample_data(n_samples=n_samples)
+        attributions = self.get_all_attributions(sample_data['images_flat'])
+        
+        # Filter out None attributions
+        valid_methods = {k: v for k, v in attributions.items() if v is not None}
+        method_names = list(valid_methods.keys())
+        
+        # Create large grid: n_samples rows x (n_methods + 1) columns
+        n_methods = len(method_names)
+        fig, axes = plt.subplots(n_samples, n_methods + 1, figsize=(20, 5*n_samples))
+        
+        if n_samples == 1:
+            axes = axes.reshape(1, -1)
+        
+        for sample_idx in range(n_samples):
+            # Original image in first column
+            axes[sample_idx, 0].imshow(sample_data['images'][sample_idx], cmap='gray')
+            axes[sample_idx, 0].set_title(f'Original\nSample {sample_idx+1}')
+            axes[sample_idx, 0].axis('off')
+            
+            # Attribution methods in remaining columns
+            for method_idx, (method_name, attribution) in enumerate(valid_methods.items()):
+                col_idx = method_idx + 1
+                
+                # Reshape and normalize attribution
+                attr_reshaped = attribution[sample_idx].reshape(28, 28)
+                attr_normalized = (attr_reshaped - attr_reshaped.min()) / (attr_reshaped.max() - attr_reshaped.min() + 1e-8)
+                
+                im = axes[sample_idx, col_idx].imshow(attr_normalized, cmap='hot', alpha=0.8)
+                axes[sample_idx, col_idx].set_title(f'{method_name.replace("_", " ").title()}\nSample {sample_idx+1}')
+                axes[sample_idx, col_idx].axis('off')
+        
+        plt.tight_layout()
+        
+        # Save comprehensive grid
+        os.makedirs(output_dir, exist_ok=True)
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        filename = f"tipos_de_metodos_comprehensive_grid_{n_samples}samples_{timestamp}.png"
+        filepath = os.path.join(output_dir, filename)
+        
+        plt.savefig(filepath, dpi=300, bbox_inches='tight', facecolor='white', edgecolor='none')
+        print(f"✓ Comprehensive grid saved as: {filepath}")
+        
+        plt.show()
+        plt.close()
 
 
 if __name__ == "__main__":
-    # Test the implementation
+    # Test the implementation and generate saved visualizations
     interp = InterpretabilityMethods()
     
-    # Get sample data
-    sample_data = interp.get_sample_data(n_samples=5)
+    print("🎨 Generating and saving interpretability visualizations...")
     
-    # Get attributions for first sample
-    test_input = sample_data['images_flat'][:1]  # First sample
-    attributions = interp.get_all_attributions(test_input)
+    # Option 1: Save individual visualizations for multiple samples
+    interp.save_multiple_visualizations(n_samples=3)
     
-    # Visualize
-    interp.visualize_attributions(sample_data['images'], attributions, sample_idx=0)
+    # Option 2: Create comprehensive comparison grid
+    interp.create_methods_comparison_grid(n_samples=2)
     
-    print("\nInterpretability methods ready for metric evaluation!")
+    print("\n✅ All visualizations saved! Check the './Imagens' folder.")
+    print("🎯 Interpretability methods ready for metric evaluation!")

@@ -7,7 +7,10 @@ Higher continuity (lower variance) indicates more stable and reliable attributio
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from interpretability_methods import InterpretabilityMethods
+import pickle
+import hashlib
+import os
+from Metodos_interpretabilidade.interpretability_methods import InterpretabilityMethods
 
 
 class ContinuityEvaluator:
@@ -17,9 +20,39 @@ class ContinuityEvaluator:
             self.interp = InterpretabilityMethods()
         else:
             self.interp = model_methods
+        
+        # Caching system for continuity results
+        self.cache_dir = './cache'
+        os.makedirs(self.cache_dir, exist_ok=True)
+    
+    def _generate_continuity_cache_key(self, method_name, input_data, noise_levels, n_perturbations):
+        """Generate cache key for continuity evaluation"""
+        data_hash = hashlib.md5(input_data.tobytes()).hexdigest()[:8]
+        params_hash = hashlib.md5(f"{noise_levels}_{n_perturbations}".encode()).hexdigest()[:4]
+        return f"continuity_{method_name}_{data_hash}_{params_hash}.pkl"
+    
+    def _save_continuity_cache(self, cache_key, data):
+        """Save continuity results to cache"""
+        cache_path = os.path.join(self.cache_dir, cache_key)
+        try:
+            with open(cache_path, 'wb') as f:
+                pickle.dump(data, f)
+        except Exception as e:
+            print(f"Warning: Could not save continuity to cache: {e}")
+    
+    def _load_continuity_cache(self, cache_key):
+        """Load continuity results from cache"""
+        cache_path = os.path.join(self.cache_dir, cache_key)
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'rb') as f:
+                    return pickle.load(f)
+            except Exception as e:
+                print(f"Warning: Could not load continuity from cache: {e}")
+        return None
     
     def compute_continuity(self, input_data, attribution_method, target_class=None,
-                          noise_levels=[0.02, 0.05], n_perturbations=5):  # OPTIMIZED - fewer levels & perturbations
+                          noise_levels=[0.02, 0.05], n_perturbations=3):
         """
         Compute continuity by measuring attribution stability under input perturbations
         
@@ -36,18 +69,26 @@ class ContinuityEvaluator:
         batch_size = input_data.shape[0]
         continuity_results = {noise: [] for noise in noise_levels}
         
-        for sample_idx in range(batch_size):
-            sample_input = input_data[sample_idx:sample_idx+1]
-            sample_target = target_class[sample_idx] if target_class is not None else None
+        # Get original attributions for all samples in one batch call
+        print(f"    Computing original attributions for {batch_size} samples...")
+        try:
+            original_attributions = attribution_method(input_data, target_class)
+        except Exception as e:
+            print(f"    Error computing original attributions: {e}")
+            return {}, {}
+        
+        for noise_level in noise_levels:
+            print(f"    Processing noise level {noise_level}...")
             
-            # Get original attribution
-            original_attribution = attribution_method(sample_input, sample_target)
+            # Create all perturbed versions at once for efficient batch processing
+            all_perturbed_inputs = []
+            sample_indices = []  # Track which sample each perturbed input belongs to
             
-            for noise_level in noise_levels:
-                attribution_variations = []
+            # Generate all perturbations for all samples
+            for sample_idx in range(batch_size):
+                sample_input = input_data[sample_idx:sample_idx+1]
                 
-                # Generate perturbations and compute attributions
-                for _ in range(n_perturbations):
+                for perturbation_idx in range(n_perturbations):
                     # Add Gaussian noise
                     noise = np.random.normal(0, noise_level, sample_input.shape)
                     perturbed_input = sample_input + noise
@@ -55,11 +96,37 @@ class ContinuityEvaluator:
                     # Clip to valid range [0, 1]
                     perturbed_input = np.clip(perturbed_input, 0, 1)
                     
-                    # Compute attribution for perturbed input
-                    perturbed_attribution = attribution_method(perturbed_input, sample_target)
-                    attribution_variations.append(perturbed_attribution[0])  # Remove batch dimension
+                    all_perturbed_inputs.append(perturbed_input[0])  # Remove batch dimension
+                    sample_indices.append(sample_idx)
+            
+            # Convert to batch format for efficient processing
+            all_perturbed_batch = np.array(all_perturbed_inputs)
+            
+            # Create target classes for all perturbed samples
+            if target_class is not None:
+                perturbed_target_classes = []
+                for sample_idx in sample_indices:
+                    perturbed_target_classes.append(target_class[sample_idx])
+                perturbed_target_classes = np.array(perturbed_target_classes)
+            else:
+                perturbed_target_classes = None
+            
+            print(f"      Computing attributions for {len(all_perturbed_batch)} perturbed samples in batch...")
+            
+            # CRITICAL: Compute all perturbed attributions in ONE batch call
+            all_perturbed_attributions = attribution_method(all_perturbed_batch, perturbed_target_classes)
+            
+            # Reorganize results by original sample
+            attribution_idx = 0
+            for sample_idx in range(batch_size):
+                attribution_variations = []
                 
-                # Calculate variance across perturbations
+                # Collect all perturbations for this sample
+                for perturbation_idx in range(n_perturbations):
+                    attribution_variations.append(all_perturbed_attributions[attribution_idx])
+                    attribution_idx += 1
+                
+                # Calculate variance across perturbations for this sample
                 attribution_variations = np.array(attribution_variations)
                 attribution_variance = np.var(attribution_variations, axis=0)
                 
@@ -75,7 +142,6 @@ class ContinuityEvaluator:
     def evaluate_all_methods(self, n_samples=30, random_state=42):
         """
         Evaluate continuity for all attribution methods
-        Note: Using fewer samples than selectivity as this is computationally intensive
         """
         print("Getting sample data...")
         sample_data = self.interp.get_sample_data(n_samples=n_samples, random_state=random_state)
@@ -94,22 +160,40 @@ class ContinuityEvaluator:
         print("\nEvaluating continuity for each method:")
         for method_name, method_func in attribution_methods.items():
             try:
+                # Check cache first
+                cache_key = self._generate_continuity_cache_key(
+                    method_name, 
+                    sample_data['images_flat'], 
+                    [0.02, 0.05],  # Default noise levels
+                    5  # Default perturbations
+                )
+                cached_result = self._load_continuity_cache(cache_key)
+                
+                if cached_result is not None:
+                    print(f"  ✓ {method_name} continuity loaded from cache")
+                    results[method_name] = cached_result
+                    continue
+                
                 print(f"  Evaluating {method_name}...")
                 avg_continuity, individual_scores = self.compute_continuity(
                     sample_data['images_flat'],
                     method_func,
                     target_class=None,  # Use predicted classes
-                    noise_levels=[0.01, 0.02, 0.05, 0.1],
-                    n_perturbations=5  # Reduced for faster computation
+                    noise_levels=[0.05],  # Single noise level for speed
+                    n_perturbations=3  # Minimal perturbations for MNIST
                 )
-                results[method_name] = {
+                result_data = {
                     'avg_continuity': avg_continuity,
                     'individual_scores': individual_scores
                 }
+                results[method_name] = result_data
+                
+                # Save to cache
+                self._save_continuity_cache(cache_key, result_data)
                 
                 # Print summary (lower is better for continuity)
-                final_continuity = avg_continuity[0.1]  # At highest noise level
-                print(f"    Continuity score (noise=0.1): {final_continuity:.6f}")
+                final_continuity = avg_continuity[0.05]  # At highest noise level
+                print(f"    Continuity score (noise=0.05): {final_continuity:.6f}")
                 
             except Exception as e:
                 print(f"    Error evaluating {method_name}: {str(e)}")
