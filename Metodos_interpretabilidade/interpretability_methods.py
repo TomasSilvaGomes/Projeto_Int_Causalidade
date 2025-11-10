@@ -5,13 +5,6 @@ Gera e visualiza atribuições XAI para a CNN em PyTorch, salvando o resultado.
 
 import sys
 import os
-
-# =========================================================================
-# 1. CORREÇÃO DE CAMINHOS: CALCULAR A RAIZ DO PROJETO DE FORMA ABSOLUTA
-# =========================================================================
-
-# Adiciona a raiz do projeto (Pasta superior ao script atual) ao sys.path
-# Isto permite importar "Rede.rede_pytorch"
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -35,13 +28,6 @@ warnings.filterwarnings("ignore", message="Setting backward hooks on ReLU activa
 # Constantes de Normalização do MNIST
 MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
-
-# =========================================================================
-# 2. CORREÇÃO DE CONSTANTES: USAR CAMINHOS ABSOLUTOS BASEADOS NA RAIZ
-# =========================================================================
-
-# Configuração da Pasta
-# OUTPUT_DIR será 'Projeto_Int_Causalidade/Imagens'
 OUTPUT_DIR = os.path.join(project_root, "Imagens")
 # MODEL_PATH será 'Projeto_Int_Causalidade/Rede/mnist_cnn_pytorch.pth'
 MODEL_PATH = os.path.join(project_root, 'Rede', 'mnist_cnn_pytorch.pth')

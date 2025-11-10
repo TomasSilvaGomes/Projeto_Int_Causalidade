@@ -13,20 +13,20 @@ class CNN(nn.Module):
         # Camadas Convolucionais
         self.conv_layers = nn.Sequential(
             # Input: 1x28x28
-            nn.Conv2d(1, 10, kernel_size=5), # Output: 10x24x24
+            nn.Conv2d(1, 10, kernel_size=5),  
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),      # Output: 10x12x12
-            nn.Conv2d(10, 20, kernel_size=5), # Output: 20x8x8
+            nn.MaxPool2d(kernel_size=2),      
+            nn.Conv2d(10, 20, kernel_size=5), 
             nn.ReLU(),
-            nn.MaxPool2d(kernel_size=2),      # Output: 20x4x4 (Esta será a última camada conv)
+            nn.MaxPool2d(kernel_size=2),     
         )
         
         # Camadas Densa (FC)
         self.fc_layers = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(20 * 4 * 4, 50), # 20*4*4 = 320
+            nn.Linear(20 * 4 * 4, 50), 
             nn.ReLU(),
-            nn.Linear(50, 10)          # Output para 10 classes
+            nn.Linear(50, 10)          
         )
         print(self)
 
@@ -54,7 +54,7 @@ def train_and_save_model(model_path='Rede/mnist_cnn_pytorch.pth', data_dir='./sa
     test_dataset = datasets.MNIST(root=data_dir, train=False, download=True, transform=transform)
     
     train_loader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=1000, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=64, shuffle=False)
     
     # Initialize model, loss, and optimizer
     model = CNN().to(device) # Usar a nova classe CNN
@@ -98,7 +98,7 @@ def train_and_save_model(model_path='Rede/mnist_cnn_pytorch.pth', data_dir='./sa
     test_loss /= len(test_loader.dataset)
     accuracy = 100. * correct / len(test_loader.dataset)
     print(f"\nTest set: Average loss: {test_loss:.4f}, Accuracy: {correct}/{len(test_loader.dataset)} ({accuracy:.2f}%)\n")
-    return model # Retornar o modelo treinado para facilitar
+    return model 
 
 if __name__ == '__main__':
     train_and_save_model()

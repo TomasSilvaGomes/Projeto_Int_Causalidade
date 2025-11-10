@@ -7,13 +7,6 @@ Monotonicity, Sparseness e MaxSensitivity.
 
 import sys
 import os
-
-# =========================================================================
-# 1. CORREÇÃO DE CAMINHOS: CALCULAR A RAIZ DO PROJETO DE FORMA ABSOLUTA
-# =========================================================================
-
-# Adiciona a raiz do projeto (Pasta superior ao script atual) ao sys.path
-# Isto permite importar "Rede.rede_pytorch"
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
