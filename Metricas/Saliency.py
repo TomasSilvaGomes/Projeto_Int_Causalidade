@@ -4,7 +4,19 @@ Avalia o método XAI Saliency (gradiente simples) com as métricas:
 Monotonicity, Sparseness e MaxSensitivity.
 """
 
+import sys
 import os
+
+# =========================================================================
+# 1. CORREÇÃO DE CAMINHOS: CALCULAR A RAIZ DO PROJETO DE FORMA ABSOLUTA
+# =========================================================================
+
+# Adiciona a raiz do projeto (Pasta superior ao script atual) ao sys.path
+# Isto permite importar "Rede.rede_pytorch"
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 import torch
 import numpy as np
 import pandas as pd
@@ -17,7 +29,7 @@ from Rede.rede_pytorch import CNN, train_and_save_model
 MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Caminho para o dataset MNIST existente
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'sample_data'))
 
@@ -128,7 +140,7 @@ def selectivity(model, x, target, attr, step=10):
     return np.mean(scores)
 
 
-def ROAD(model, x, target, attr_func, n_samples=10, noise_std=0.01):
+def ROAD(model, x, target, attr_func, n_samples=10, noise_std=0.3):
     """
     Mede a robustez da explicação face a pequenas perturbações no input.
     Corresponde ao conceito de ROAD: Remove And Debias.

@@ -4,9 +4,22 @@ Avalia o método XAI Guided Grad-CAM na camada model.conv_layers[0]
 com as métricas: Monotonicity, Sparseness e MaxSensitivity.
 """
 
+import sys
+import os
+
+# =========================================================================
+# 1. CORREÇÃO DE CAMINHOS: CALCULAR A RAIZ DO PROJETO DE FORMA ABSOLUTA
+# =========================================================================
+
+# Adiciona a raiz do projeto (Pasta superior ao script atual) ao sys.path
+# Isto permite importar "Rede.rede_pytorch"
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 import os
 import torch
 import numpy as np
+import matplotlib.pyplot as plt
 import pandas as pd
 from torchvision import datasets, transforms
 from Rede.rede_pytorch import CNN, train_and_save_model
@@ -17,7 +30,7 @@ from Rede.rede_pytorch import CNN, train_and_save_model
 MNIST_MEAN = 0.1307
 MNIST_STD = 0.3081
 
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+
 # Caminho para o dataset MNIST existente
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'sample_data'))
 
@@ -152,7 +165,7 @@ def selectivity(model, x, target, attr, step=10):
     return np.mean(scores)
 
 
-def ROAD(model, x, target, attr_func, n_samples=10, noise_std=0.1, layer=None):
+def ROAD(model, x, target, attr_func, n_samples=10, noise_std=0.5, layer=None):
     """
     Mede a robustez da explicação face a pequenas perturbações no input.
     Corresponde ao conceito de ROAD: Remove And Debias.
@@ -181,7 +194,7 @@ def evaluate_guided_gradcam():
     results = {
         "Continuity": continuity(model, x_batch, y_batch, attr),
         "Selectivity": selectivity(model, x_batch, y_batch, attr),
-        "ROAD": ROAD(model, x_batch, y_batch, guided_gradcam, n_samples=10, noise_std=0.1, layer= layer),
+        "ROAD": ROAD(model, x_batch, y_batch, guided_gradcam, n_samples=10, noise_std=0.5, layer= layer),
     }
 
     df = pd.DataFrame([results], index=["Guided Grad-CAM"])
@@ -190,8 +203,101 @@ def evaluate_guided_gradcam():
     print("\nResultados da Avaliação:")
     print(df)
     print(f"\nSalvo em: {csv_path}")
+        # === VISUALIZAÇÃO DAS MÉTRICAS EM SUBPLOTS ================================
+    fig, axes = plt.subplots(3, 3, figsize=(12, 9))  # 3 métricas x 3 colunas (original, máscara, resultante)
+    fig.suptitle("Avaliação Visual das Métricas para Guided Grad-CAM (Exemplo com Label 0)", fontsize=14)
+
+    # Seleciona uma amostra (e.g., Label 0) para visualização
+    sample_idx = 0
+    x_sample = x_batch[sample_idx].unsqueeze(0)
+    y_sample = y_batch[sample_idx].unsqueeze(0)
+    attr_sample = attr[sample_idx].unsqueeze(0)
+
+    # Função auxiliar para desnormalizar imagem
+    def denormalize(img):
+        return np.clip((img.cpu().numpy().squeeze() * MNIST_STD + MNIST_MEAN), 0, 1)
+
+    # 1. Continuity
+    ax = axes[0, 0]
+    ax.imshow(denormalize(x_sample), cmap='gray')
+    ax.set_title("Original (Continuity)")
+    ax.axis('off')
+
+    # Máscara cumulativa (exemplo: remove metade dos pixels mais importantes)
+    flat_attr = attr_sample.flatten()
+    sorted_indices = torch.argsort(flat_attr, descending=True)
+    mask = torch.ones_like(flat_attr)
+    mask[sorted_indices[:len(sorted_indices)//2]] = 0  # Remove top 50%
+    mask = mask.view_as(x_sample)
+    masked_x = x_sample * mask
+
+    ax = axes[0, 1]
+    ax.imshow(mask.squeeze().cpu().numpy(), cmap='hot', alpha=0.5)
+    ax.set_title("Máscara Cumulativa")
+    ax.axis('off')
+
+    ax = axes[0, 2]
+    ax.imshow(denormalize(masked_x), cmap='gray')
+    ax.set_title(f"Imagem Mascarada\n(Continuity: {results['Continuity']:.4f})")
+    ax.axis('off')
+
+    # 2. Selectivity
+    ax = axes[1, 0]
+    ax.imshow(denormalize(x_sample), cmap='gray')
+    ax.set_title("Original (Selectivity)")
+    ax.axis('off')
+
+    # Máscara seletiva (remove top-10% das características)
+    attr_flat = attr_sample.flatten(1)
+    topk = int(0.1 * attr_flat.shape[1])  # Top 10%
+    topk_indices = attr_flat.topk(topk, dim=1).indices
+    mask_sel = torch.ones_like(attr_flat)
+    mask_sel.scatter_(1, topk_indices, 0)
+    masked_x_sel = (x_sample.flatten(1) * mask_sel).view_as(x_sample)
+
+    ax = axes[1, 1]
+    mask_vis = mask_sel.view_as(x_sample).squeeze().cpu().numpy()
+    ax.imshow(mask_vis, cmap='hot', alpha=0.5)
+    ax.set_title("Máscara Seletiva (Top 10%)")
+    ax.axis('off')
+
+    ax = axes[1, 2]
+    ax.imshow(denormalize(masked_x_sel), cmap='gray')
+    ax.set_title(f"Imagem Perturbada\n(Selectivity: {results['Selectivity']:.4f})")
+    ax.axis('off')
+
+    # 3. ROAD
+    ax = axes[2, 0]
+    ax.imshow(denormalize(x_sample), cmap='gray')
+    ax.set_title("Original (ROAD)")
+    ax.axis('off')
+
+    # Adiciona ruído e recalcula atribuição
+    noise = torch.randn_like(x_sample) * 0.5
+    x_noisy = x_sample + noise
+    attr_noisy = guided_gradcam(model, x_noisy, y_sample, layer)
+
+    ax = axes[2, 1]
+    ax.imshow(denormalize(x_noisy), cmap='gray')
+    ax.set_title("Imagem com Ruído")
+    ax.axis('off')
+
+    ax = axes[2, 2]
+    diff_attr = torch.abs(attr_sample - attr_noisy).squeeze().cpu().numpy()
+    ax.imshow(diff_attr, cmap='viridis')
+    ax.set_title(f"Diferença nas Atribuições\n(ROAD: {results['ROAD']:.4f})")
+    ax.axis('off')
+
+    plt.tight_layout()
+    plot_path = os.path.join(OUTPUT_DIR, "GuidedGradCAM_Visualizacao_Metricas.png")
+    plt.savefig(plot_path)
+    print(f"Visualização salva em: {plot_path}")
+    plt.close()
+    
     return df
 
 
 if __name__ == "__main__":
     evaluate_guided_gradcam()
+
+    

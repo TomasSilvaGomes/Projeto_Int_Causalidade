@@ -24,9 +24,13 @@ import matplotlib.pyplot as plt
 from torchvision import datasets, transforms
 import os
 from Rede.rede_pytorch import CNN, train_and_save_model
-# Importações dos métodos Captum (necessário para o quantus.explain)
-# O código anterior falhava sem estas importações explícitas
 from captum.attr import InputXGradient, DeepLift, IntegratedGradients, Saliency, GuidedGradCam
+import warnings
+
+# Suprime warnings específicos do Captum (opcional: ajuste se quiser suprimir apenas esses)
+warnings.filterwarnings("ignore", message="Setting forward, backward hooks and attributes on non-linear")
+warnings.filterwarnings("ignore", message="Setting backward hooks on ReLU activations")
+
 
 # Constantes de Normalização do MNIST
 MNIST_MEAN = 0.1307
@@ -85,28 +89,15 @@ def setup_data_and_model(model_path=MODEL_PATH):
 
 
 def generate_and_visualize_attributions(model, x_batch, y_batch, device):
-    """Gera atribuições XAI e salva a visualização."""
+    """Gera atribuições XAI usando Captum diretamente e salva a visualização."""
 
-    # Métodos XAI a serem usados (com sintaxe corrigida e melhorias)
+    # Métodos XAI usando Captum diretamente (instâncias prontas)
     xai_methods = {
-        "InputXGradient": {"method": "InputXGradient"},
-
-        "DeepLift": {
-            "method": "DeepLift",
-            "n_samples": 100,
-        },
-        "Integrated Gradients": {
-            "method": "IntegratedGradients",
-            "baselines": torch.zeros_like(x_batch).to(device),
-            "n_steps": 100,
-        },
-        "Saliency": {
-            "method": "Saliency",
-        },
-        "Guided-GradCAM": {
-            "method": "GuidedGradCam",
-            "gc_layer": model.conv_layers[0],  # Altere esta linha
-        },
+        "InputXGradient": InputXGradient(model),
+        "DeepLift": DeepLift(model),
+        "Integrated Gradients": IntegratedGradients(model),
+        "Saliency": Saliency(model),
+        "Guided-GradCAM": GuidedGradCam(model, model.conv_layers[0]),  # Ajuste se a camada for diferente
     }
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -128,10 +119,9 @@ def generate_and_visualize_attributions(model, x_batch, y_batch, device):
         )
 
         # 1. Imagem Original (Desnormalizada)
-        # Inverte a normalização para visualização: Imagem = (Tensor * Std) + Mean
         mean = 0.1307
         std = 0.3081
-        original_img = x_sample.detach().squeeze().numpy() * std + mean
+        original_img = x_sample.detach().squeeze().cpu().numpy() * std + mean
         original_img = np.clip(original_img, 0, 1)  # Clipa valores
 
         ax_img = axes[0, 0]
@@ -141,25 +131,24 @@ def generate_and_visualize_attributions(model, x_batch, y_batch, device):
         axes[1, 0].axis('off')  # Desliga o eixo da colorbar para a imagem original
 
         # 2. Gera e plota as atribuições para todos os métodos
-        for idx, (method_name, kwargs) in enumerate(xai_methods.items()):
+        for idx, (method_name, method_instance) in enumerate(xai_methods.items()):
             ax_img = axes[0, idx + 1]
             ax_cb = axes[1, idx + 1]
 
             try:
-                # Usa quantus.explain para obter a atribuição
-                attribution_batch = quantus.explain(
-                    model=model,
-                    inputs=x_sample,
-                    targets=y_batch[i].unsqueeze(0),
-                    device=device,
-                    **kwargs
-                )
+                # Chama o método Captum diretamente
+                if method_name == "Integrated Gradients":
+                    # Para IntegratedGradients, usa baseline
+                    baselines = torch.zeros_like(x_sample).to(device)
+                    attribution_map = method_instance.attribute(x_sample, baselines=baselines, target=y_label, n_steps=100)
+                else:
+                    attribution_map = method_instance.attribute(x_sample, target=y_label)
 
-                attribution_map = attribution_batch.squeeze()
+                # Converte para numpy
+                attribution_map = attribution_map.squeeze().detach().cpu().numpy()
 
                 # Métodos que produzem apenas atribuições positivas ou cujo valor absoluto é mais informativo
-                if method_name in ["InputXGradient", "DeepLiftShap", "Integrated Gradients", "Guided-GradCAM",
-                                   "FusionGrad"]:
+                if method_name in ["InputXGradient", "Integrated Gradients", "Guided-GradCAM"]:
                     # Usar valor absoluto e um colormap sequencial para realçar a importância
                     abs_attr = np.abs(attribution_map)
                     im = ax_img.imshow(abs_attr, cmap="viridis")
@@ -187,6 +176,7 @@ def generate_and_visualize_attributions(model, x_batch, y_batch, device):
         plt.savefig(filename)
         print(f"Salvo comparação XAI para Label {y_label} em: {filename}")
         plt.close(fig)
+     
 
 
 if __name__ == "__main__":
