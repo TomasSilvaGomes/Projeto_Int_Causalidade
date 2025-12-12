@@ -16,7 +16,11 @@ import pandas as pd
 from quantus import Selectivity
 from torchvision import datasets, transforms
 from Rede.rede_pytorch import CNN, train_and_save_model
-
+from typing import Callable
+import torch
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
 
 # === CONFIGURAÇÃO GERAL ====================================================
 
@@ -98,8 +102,7 @@ def deeplift(model, x, target, baseline=None):
 
 # === MÉTRICAS ===============================================================
 
-import torch
-import numpy as np
+
 
 
 def continuity(model, x, target, attr, step=1):
@@ -148,19 +151,80 @@ def selectivity(model, x, target, attr, step=10):
     return np.mean(scores)
 
 
-def ROAD(model, x, target, attr_func, n_samples=10, noise_std=0.3):
+def ROAD(
+    model: torch.nn.Module,
+    x: torch.Tensor,
+    target: torch.Tensor,
+    attr_func: Callable,
+    # Argumentos da métrica (ROAD/AOPC):
+    n_steps_metric: int = 100,  # Novo nome para não colidir com n_steps do IG
+    percent_to_remove: float = 0.25,
+    mask_value: float = 0.0,
+    # Capturar argumentos obsoletos ou específicos do XAI:
+    **kwargs: any
+) -> float:
     """
-    Mede a robustez da explicação face a pequenas perturbações no input.
-    Corresponde ao conceito de ROAD: Remove And Debias.
+    IMPLEMENTAÇÃO ROAD/AOPC (FIDELIDADE).
+    Mede a queda na confiança do modelo quando as features mais relevantes são removidas 
+    progressivamente. Um valor ALTO indica ALTA FIDELIDADE (a confiança cai muito).
     """
-    base_attr = attr_func(model, x, target)
-    max_diff = 0
-    for _ in range(n_samples):
-        noise = torch.randn_like(x) * noise_std
-        pert_attr = attr_func(model, x + noise, target)
-        diff = torch.abs(base_attr - pert_attr).mean().item()
-        max_diff = max(max_diff, diff)
-    return max_diff
+    if x.size(0) == 0:
+        return 0.0
+
+    # 1. Filtrar argumentos para a função de atribuição (attr_func)
+    # Remove todos os argumentos que pertencem à métrica (ROAD) e não à atribuição (deeplift, etc.)
+    attr_kwargs = {k: v for k, v in kwargs.items() if k not in ['n_samples', 'noise_std']}
+    
+    # 2. Preparar dados
+    batch_size = x.size(0)
+    
+    # Calcular a atribuição (passando APENAS argumentos do XAI)
+    attribution = attr_func(model, x, target, **attr_kwargs).squeeze(1).abs().flatten(1)
+    
+    # Ordenar os índices de atribuição do mais relevante para o menos relevante
+    sorted_indices = torch.argsort(attribution, dim=1, descending=True)
+
+    # Confiança original na classe alvo
+    with torch.no_grad():
+        output_orig = model(x).softmax(1)
+        pred_orig = output_orig[torch.arange(batch_size), target]
+    
+    confidences = []
+    x_perturbed = x.clone().to(x.device)
+    
+    # 3. Iteração e Perturbação (AOPC logic)
+    
+    total_pixels = attribution.size(1)
+    max_pixels_to_remove = int(total_pixels * percent_to_remove)
+    pixels_per_step = max_pixels_to_remove // n_steps_metric
+
+    if pixels_per_step == 0:
+        pixels_per_step = 1
+        n_steps_metric = max_pixels_to_remove
+    
+    
+    for i in range(1, n_steps_metric + 1):
+        num_remove = i * pixels_per_step
+        
+        # Perturbar o input
+        for b in range(batch_size):
+            mask_indices = sorted_indices[b, :num_remove]
+            x_perturbed.flatten(1)[b, mask_indices] = mask_value
+        
+        # 4. Calcular a nova confiança
+        with torch.no_grad():
+            output_pert = model(x_perturbed).softmax(1)
+            pred_pert = output_pert[torch.arange(batch_size), target]
+        
+        # Queda de confiança (Fidelidade: Confiança Original - Confiança Perturbada)
+        drop = (pred_orig - pred_pert).mean().item()
+        confidences.append(drop)
+        
+        # Resetar o input
+        x_perturbed = x.clone().to(x.device)
+        
+    # 5. O resultado é a média da queda de confiança (AOPC)
+    return np.mean(confidences)
 
 
 # === AVALIAÇÃO FINAL =======================================================
@@ -169,13 +233,16 @@ def evaluate_deeplift():
     print("\nIniciando avaliação com DeepLIFT...")
     model, x_batch, y_batch, device = load_model_and_data()
 
-    # Calcular as atribuições
+    # Cálculo inicial da atribuição
     attr = deeplift(model, x_batch, y_batch)
 
+    # 1. CÁLCULO DAS MÉTRICAS
     results = {
         "Continuity": continuity(model, x_batch, y_batch, attr),
         "Selectivity": selectivity(model, x_batch, y_batch, attr),
-        "ROAD": ROAD(model, x_batch, y_batch, deeplift, n_samples=10, noise_std=0.3)
+        "ROAD": ROAD(model, x_batch, y_batch, deeplift, 
+                     n_steps_metric=50, 
+                     percent_to_remove=0.25) 
     }
 
     df = pd.DataFrame([results], index=["DeepLIFT"])
@@ -183,9 +250,126 @@ def evaluate_deeplift():
     df.to_csv(csv_path)
     print("\nResultados da Avaliação:")
     print(df)
-    print(f"\nSalvo em: {csv_path}")
-    return df
 
+    # === VISUALIZAÇÃO (3 LINHAS x 4 COLUNAS) =================================
+    
+    fig, axes = plt.subplots(3, 4, figsize=(18, 12))
+    label_to_show = 0
+    fig.suptitle(f"Análise Visual das Métricas: DeepLIFT (Label {label_to_show})", fontsize=22, fontweight='bold', y=0.98)
+
+    sample_idx = label_to_show 
+    x_sample = x_batch[sample_idx].unsqueeze(0)
+    y_sample = y_batch[sample_idx].unsqueeze(0)
+    attr_sample = attr[sample_idx].unsqueeze(0)
+
+    def denormalize(img):
+        img_np = img.cpu().numpy().squeeze()
+        return np.clip((img_np * MNIST_STD + MNIST_MEAN), 0, 1)
+
+    # --- LINHA 1: SELECTIVITY (Fidelidade Pontual) ---
+    
+    row = 0
+    # Col 1: Original
+    axes[row, 0].imshow(denormalize(x_sample), cmap='gray')
+    axes[row, 0].set_ylabel("SELECTIVITY\n(Fidelidade)", fontsize=16, fontweight='bold', labelpad=20)
+    axes[row, 0].set_title("Input Original", fontsize=12)
+    
+    # Col 2: Saliência
+    attr_vis = attr_sample.squeeze().abs().cpu().numpy()
+    axes[row, 1].imshow(denormalize(x_sample), cmap='gray', alpha=0.5)
+    axes[row, 1].imshow(attr_vis, cmap='jet', alpha=0.6)
+    axes[row, 1].set_title("Foco de Atribuição", fontsize=12)
+    
+    # Col 3: Máscara (Top 20%)
+    attr_flat = attr_sample.flatten(1).abs()
+    topk = int(0.20 * attr_flat.shape[1])
+    topk_indices = attr_flat.topk(topk, dim=1).indices
+    mask_sel = torch.ones_like(attr_flat)
+    mask_sel.scatter_(1, topk_indices, 0) 
+    
+    mask_display = torch.zeros_like(attr_flat)
+    mask_display.scatter_(1, topk_indices, 1) 
+    axes[row, 2].imshow(mask_display.view_as(x_sample).squeeze().cpu().numpy(), cmap='Reds')
+    axes[row, 2].set_title("Áreas Removidas (Top 20%)", fontsize=12)
+    
+    # Col 4: Resultado + Score
+    masked_x_sel = (x_sample.flatten(1) * mask_sel).view_as(x_sample)
+    axes[row, 3].imshow(denormalize(masked_x_sel), cmap='gray')
+    axes[row, 3].set_title(f"Score Calculado: {results['Selectivity']:.4f}", fontsize=14, fontweight='bold', color='green')
+    axes[row, 3].set_xlabel("Maior queda de confiança\nimplica melhor Selectivity.", fontsize=11)
+
+
+    # --- LINHA 2: CONTINUITY (Estabilidade/Robustez) ---
+    
+    row = 1
+    # Col 1: Original
+    axes[row, 0].imshow(denormalize(x_sample), cmap='gray')
+    axes[row, 0].set_ylabel("CONTINUITY\n(Estabilidade)", fontsize=16, fontweight='bold', labelpad=20)
+    axes[row, 0].set_title("Input Original", fontsize=12)
+    
+    # Col 2: Ruído
+    noise = torch.randn_like(x_sample) * 0.5
+    x_noisy = x_sample + noise
+    axes[row, 1].imshow(denormalize(x_noisy), cmap='gray')
+    axes[row, 1].set_title("Input com Ruído", fontsize=12)
+    
+    # Col 3: Saliência no Ruído
+    attr_noisy = deeplift(model, x_noisy, y_sample, baseline=None)
+    attr_noisy_vis = attr_noisy.squeeze().abs().cpu().numpy()
+    axes[row, 2].imshow(denormalize(x_noisy), cmap='gray', alpha=0.5)
+    axes[row, 2].imshow(attr_noisy_vis, cmap='jet', alpha=0.6)
+    axes[row, 2].set_title("Saliência sob Ruído", fontsize=12)
+    
+    # Col 4: Diferença + Score
+    diff = torch.abs(attr_sample - attr_noisy).squeeze().cpu().numpy()
+    im_diff = axes[row, 3].imshow(diff, cmap='magma')
+    axes[row, 3].set_title(f"Score Calculado: {results['Continuity']:.4f}", fontsize=14, fontweight='bold', color='blue')
+    axes[row, 3].set_xlabel("Menor diferença visual\nimplica melhor Continuity.", fontsize=11)
+
+
+    # --- LINHA 3: ROAD (Fidelidade Cumulativa/AOPC) ---
+    
+    row = 2
+    # Col 1: Original
+    axes[row, 0].imshow(denormalize(x_sample), cmap='gray')
+    axes[row, 0].set_ylabel("ROAD (AOPC)\n(Fidelidade)", fontsize=16, fontweight='bold', labelpad=20)
+    axes[row, 0].set_title("Input Original", fontsize=12)
+    
+    # Col 2: Saliência 
+    axes[row, 1].imshow(denormalize(x_sample), cmap='gray', alpha=0.5)
+    axes[row, 1].imshow(attr_vis, cmap='jet', alpha=0.6)
+    axes[row, 1].set_title("Base da Decisão", fontsize=12)
+    
+    # Col 3: Máscara Agressiva
+    topk_road = int(0.50 * attr_flat.shape[1])
+    topk_idx_road = attr_flat.topk(topk_road, dim=1).indices
+    mask_road = torch.ones_like(attr_flat)
+    mask_road.scatter_(1, topk_idx_road, 0)
+    
+    mask_vis_road = torch.zeros_like(attr_flat)
+    mask_vis_road.scatter_(1, topk_idx_road, 1)
+    axes[row, 2].imshow(mask_vis_road.view_as(x_sample).squeeze().cpu().numpy(), cmap='Reds')
+    axes[row, 2].set_title("Remoção Cumulativa (50%)", fontsize=12)
+    
+    # Col 4: Resultado + Score
+    masked_x_road = (x_sample.flatten(1) * mask_road).view_as(x_sample)
+    axes[row, 3].imshow(denormalize(masked_x_road), cmap='gray')
+    axes[row, 3].set_title(f"Score Calculado: {results['ROAD']:.4f}", fontsize=14, fontweight='bold', color='red')
+    axes[row, 3].set_xlabel("Média da queda de confiança\nao longo da curva de remoção.", fontsize=11)
+
+
+    # Ajustes finais
+    for ax in axes.flat:
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    plt.tight_layout()
+    plot_path = os.path.join(OUTPUT_DIR, f"DeepLIFT_Avaliacao_Label{label_to_show}.png")
+    plt.savefig(plot_path, dpi=150)
+    print(f"\nVisualização salva em: {plot_path}")
+    plt.close()
+    
+    return df
 
 if __name__ == "__main__":
     evaluate_deeplift()
