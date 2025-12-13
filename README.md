@@ -34,7 +34,7 @@ cd Projeto_Int_Causalidade
 pip install -r requirements.txt
 ```
 
-## 📁 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 Projeto_Int_Causalidade/
@@ -112,7 +112,7 @@ python Tabela_Avaliacao.py
 
 Gera o arquivo `Tabela_Avaliacao.csv` com todos os resultados de avaliação.
 
-## 📊 Métricas de Avaliação
+## Métricas de Avaliação
 
 O projeto utiliza o framework [Quantus](https://github.com/understandable-machine-intelligence-lab/Quantus) para avaliar quantitativamente os métodos de interpretabilidade. As métricas incluem:
 
@@ -131,7 +131,7 @@ O projeto utiliza o framework [Quantus](https://github.com/understandable-machin
 - **Matplotlib**: Visualização
 - **scikit-learn & scikit-image**: Processamento e análise
 
-## 📝 Dependências Principais
+## Dependências Principais
 
 ```
 torch==2.9.0+cu130
@@ -146,7 +146,7 @@ scikit-learn==1.7.2
 
 Veja `requirements.txt` para a lista completa de dependências.
 
-## 🖼️ Resultados
+## Resultados
 
 As visualizações geradas mostram como cada método de interpretabilidade destaca diferentes regiões da imagem como importantes para a predição do modelo. As imagens são salvas na pasta `Imagens/` com o formato:
 
