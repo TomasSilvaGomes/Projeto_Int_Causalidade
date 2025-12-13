@@ -2,7 +2,7 @@
 
 Este projeto explora métodos de interpretabilidade em redes neurais convolucionais (CNN) aplicadas ao dataset MNIST. O objetivo é comparar diferentes técnicas de XAI (Explainable AI) para entender como o modelo toma suas decisões.
 
-## 📋 Descrição
+## Descrição
 
 O projeto implementa uma rede neural convolucional (CNN) em PyTorch para classificação de dígitos manuscritos do MNIST e aplica diversos métodos de interpretabilidade para visualizar as atribuições de importância dos pixels nas predições do modelo.
 
@@ -14,7 +14,7 @@ O projeto implementa uma rede neural convolucional (CNN) em PyTorch para classif
 - **Saliency**: Calcula o gradiente da saída em relação à entrada
 - **Guided-GradCAM**: Combina Guided Backpropagation com Grad-CAM
 
-## 🚀 Instalação
+## Instalação
 
 ### Pré-requisitos
 
@@ -34,7 +34,7 @@ cd Projeto_Int_Causalidade
 pip install -r requirements.txt
 ```
 
-## 📁 Estrutura do Projeto
+## Estrutura do Projeto
 
 ```
 Projeto_Int_Causalidade/
@@ -57,7 +57,7 @@ Projeto_Int_Causalidade/
 └── requirements.txt             # Dependências do projeto
 ```
 
-## 🎯 Uso
+## Uso
 
 ### 1. Treinar o Modelo CNN
 
@@ -112,7 +112,7 @@ python Tabela_Avaliacao.py
 
 Gera o arquivo `Tabela_Avaliacao.csv` com todos os resultados de avaliação.
 
-## 📊 Métricas de Avaliação
+## Métricas de Avaliação
 
 O projeto utiliza o framework [Quantus](https://github.com/understandable-machine-intelligence-lab/Quantus) para avaliar quantitativamente os métodos de interpretabilidade. As métricas incluem:
 
@@ -122,7 +122,7 @@ O projeto utiliza o framework [Quantus](https://github.com/understandable-machin
 - Localização
 - Entre outras
 
-## 🛠️ Tecnologias Utilizadas
+## Tecnologias Utilizadas
 
 - **PyTorch**: Framework de deep learning
 - **Captum**: Biblioteca de interpretabilidade para PyTorch
@@ -131,7 +131,7 @@ O projeto utiliza o framework [Quantus](https://github.com/understandable-machin
 - **Matplotlib**: Visualização
 - **scikit-learn & scikit-image**: Processamento e análise
 
-## 📝 Dependências Principais
+## Dependências Principais
 
 ```
 torch==2.9.0+cu130
@@ -146,7 +146,7 @@ scikit-learn==1.7.2
 
 Veja `requirements.txt` para a lista completa de dependências.
 
-## 🖼️ Resultados
+## Resultados
 
 As visualizações geradas mostram como cada método de interpretabilidade destaca diferentes regiões da imagem como importantes para a predição do modelo. As imagens são salvas na pasta `Imagens/` com o formato:
 
@@ -159,7 +159,7 @@ Cada imagem contém:
 - Visualizações de todos os métodos de interpretabilidade
 - Colorbars indicando a intensidade da importância/contribuição
 
-## 🔬 Arquitetura do Modelo
+## Arquitetura do Modelo
 
 A CNN implementada possui a seguinte arquitetura:
 
@@ -173,14 +173,10 @@ Linear(50→10)
 Output: 10 classes (dígitos 0-9)
 ```
 
-## 📄 Licença
-
-Este projeto é de código aberto e está disponível para fins educacionais e de pesquisa.
-
-## 👥 Autor
+## Autor
 
 Tomás Silva Gomes
 
-## 🤝 Contribuições
+## Contribuições
 
 Contribuições são bem-vindas! Sinta-se à vontade para abrir issues ou pull requests.
